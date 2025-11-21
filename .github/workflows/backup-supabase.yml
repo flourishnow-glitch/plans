@@ -173,4 +173,3 @@ jobs:
           echo "- **Status**: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "✅ Backup terminé avec succès" >> $GITHUB_STEP_SUMMARY
-
