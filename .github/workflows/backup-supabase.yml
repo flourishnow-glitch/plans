@@ -31,19 +31,24 @@ jobs:
       
       - name: Setup PostgreSQL client
         run: |
+          set -e
           sudo apt-get update
-          # Essayer d'abord avec le client générique (plus simple)
-          sudo apt-get install -y postgresql-client || {
-            echo "⚠️  postgresql-client non disponible, installation du dépôt PostgreSQL officiel..."
-            # Installer les dépendances nécessaires
-            sudo apt-get install -y wget ca-certificates lsb-release gnupg
-            # Ajouter le dépôt PostgreSQL officiel pour PostgreSQL 15
-            sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
-            wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
-            sudo apt-get update
-            # Installer postgresql-client-15
-            sudo apt-get install -y postgresql-client-15
-          }
+          
+          # Installer les dépendances nécessaires
+          sudo apt-get install -y wget ca-certificates lsb-release gnupg
+          
+          # Ajouter le dépôt PostgreSQL officiel
+          echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          
+          # Ajouter la clé GPG
+          wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
+          
+          # Mettre à jour les dépôts
+          sudo apt-get update
+          
+          # Installer postgresql-client-15
+          sudo apt-get install -y postgresql-client-15
+          
           echo "✅ PostgreSQL client installé"
           pg_dump --version
       
