@@ -32,7 +32,20 @@ jobs:
       - name: Setup PostgreSQL client
         run: |
           sudo apt-get update
-          sudo apt-get install -y postgresql-client-15
+          # Essayer d'abord avec le client générique (plus simple)
+          if sudo apt-get install -y postgresql-client; then
+            echo "✅ postgresql-client installé"
+          else
+            echo "⚠️  Installation du dépôt PostgreSQL officiel..."
+            # Installer les dépendances nécessaires
+            sudo apt-get install -y wget ca-certificates lsb-release gnupg
+            # Ajouter le dépôt PostgreSQL officiel pour PostgreSQL 15
+            sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+            wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
+            sudo apt-get update
+            # Installer postgresql-client-15
+            sudo apt-get install -y postgresql-client-15
+          fi
           pg_dump --version
       
       - name: Setup gcloud CLI
@@ -160,3 +173,4 @@ jobs:
           echo "- **Status**: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "✅ Backup terminé avec succès" >> $GITHUB_STEP_SUMMARY
+
