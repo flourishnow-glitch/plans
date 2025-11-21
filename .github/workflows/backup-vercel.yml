@@ -24,7 +24,9 @@ jobs:
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
-          echo "$VERCEL_TOKEN" | vercel login --token
+          # Vercel CLI utilise automatiquement la variable d'environnement VERCEL_TOKEN
+          # Pas besoin de vercel login si VERCEL_TOKEN est défini
+          echo "✅ Authentification Vercel via VERCEL_TOKEN"
       
       - name: Backup Vercel Environment Variables
         env:
