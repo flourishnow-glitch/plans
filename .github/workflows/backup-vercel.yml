@@ -28,6 +28,7 @@ jobs:
       
       - name: Backup Vercel Environment Variables
         env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
         run: |
@@ -37,11 +38,17 @@ jobs:
           BACKUP_DIR="vercel-backups"
           mkdir -p "$BACKUP_DIR"
           
-          # Lister toutes les variables d'environnement
-          vercel env ls > "$BACKUP_DIR/vercel-env-$TIMESTAMP.txt" 2>&1 || echo "⚠️  Impossible de lister les variables"
-          
-          # Exporter les variables (format JSON si possible)
-          vercel env pull .env.vercel.backup --environment=production 2>&1 || echo "⚠️  Impossible d'exporter les variables"
+          # Lister toutes les variables d'environnement (avec projet spécifié)
+          if [ -n "$VERCEL_PROJECT_ID" ]; then
+            vercel env ls --project="$VERCEL_PROJECT_ID" > "$BACKUP_DIR/vercel-env-$TIMESTAMP.txt" 2>&1 || echo "⚠️  Impossible de lister les variables"
+            
+            # Exporter les variables (avec projet et environnement spécifiés)
+            vercel env pull .env.vercel.backup --project="$VERCEL_PROJECT_ID" --environment=production 2>&1 || echo "⚠️  Impossible d'exporter les variables"
+          else
+            # Sans projet spécifié, essayer sans
+            vercel env ls > "$BACKUP_DIR/vercel-env-$TIMESTAMP.txt" 2>&1 || echo "⚠️  Impossible de lister les variables"
+            vercel env pull .env.vercel.backup --environment=production 2>&1 || echo "⚠️  Impossible d'exporter les variables"
+          fi
           
           if [ -f ".env.vercel.backup" ]; then
             mv .env.vercel.backup "$BACKUP_DIR/vercel-env-$TIMESTAMP.env"
@@ -49,12 +56,15 @@ jobs:
           
           echo "✅ Backup Vercel créé"
       
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      
       - name: Setup gcloud CLI
         uses: google-github-actions/setup-gcloud@v2
         with:
-          service_account_key: ${{ secrets.GCP_SA_KEY }}
           project_id: the-experience-477712-h0
-          export_default_credentials: true
       
       - name: Upload to GCS
         run: |
