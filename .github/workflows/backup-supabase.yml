@@ -31,30 +31,8 @@ jobs:
       
       - name: Setup PostgreSQL client
         run: |
-          set -e
           sudo apt-get update
-          
-          # Installer les dépendances nécessaires
-          sudo apt-get install -y wget ca-certificates lsb-release gnupg curl
-          
-          # Ajouter le dépôt PostgreSQL officiel (méthode moderne)
-          sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
-          
-          # Ajouter la clé GPG (méthode moderne sans apt-key)
-          sudo mkdir -p /etc/apt/keyrings
-          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /etc/apt/keyrings/postgresql.gpg
-          sudo chmod 644 /etc/apt/keyrings/postgresql.gpg
-          
-          # Mettre à jour les dépôts avec la nouvelle méthode
-          echo "deb [signed-by=/etc/apt/keyrings/postgresql.gpg] http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
-          
-          # Mettre à jour les dépôts
-          sudo apt-get update
-          
-          # Installer postgresql-client-15
-          sudo apt-get install -y postgresql-client-15
-          
-          echo "✅ PostgreSQL client installé"
+          sudo apt-get install -y postgresql-client
           pg_dump --version
       
       - name: Setup gcloud CLI
