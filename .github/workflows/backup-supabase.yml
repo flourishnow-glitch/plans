@@ -1,0 +1,162 @@
+name: Backup Supabase Database to GCS
+
+on:
+  schedule:
+    # Backup quotidien à 2h UTC (3h heure française en hiver, 4h en été)
+    - cron: '0 2 * * *'
+    # Backup hebdomadaire dimanche à 3h UTC
+    - cron: '0 3 * * 0'
+    # Backup mensuel le 1er à 4h UTC
+    - cron: '0 4 1 * *'
+  workflow_dispatch: # Permet déclenchement manuel
+    inputs:
+      backup_type:
+        description: 'Type de backup (daily, weekly, monthly)'
+        required: false
+        default: 'daily'
+        type: choice
+        options:
+          - daily
+          - weekly
+          - monthly
+
+jobs:
+  backup-database:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Setup PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client-15
+          pg_dump --version
+      
+      - name: Setup gcloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          service_account_key: ${{ secrets.GCP_SA_KEY }}
+          project_id: the-experience-477712-h0
+          export_default_credentials: true
+      
+      - name: Determine backup type
+        id: backup_type
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "type=${{ github.event.inputs.backup_type }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event.schedule }}" == "0 3 * * 0" ]; then
+            echo "type=weekly" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event.schedule }}" == "0 4 1 * *" ]; then
+            echo "type=monthly" >> $GITHUB_OUTPUT
+          else
+            echo "type=daily" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Create database backup
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          BACKUP_TYPE: ${{ steps.backup_type.outputs.type }}
+        run: |
+          echo "🔄 Création du backup $BACKUP_TYPE..."
+          
+          # Timestamp pour le nom de fichier
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          BACKUP_FILE="backup-${BACKUP_TYPE}-${TIMESTAMP}.sql"
+          BACKUP_FILE_GZ="${BACKUP_FILE}.gz"
+          
+          # Créer le dump PostgreSQL avec compression
+          echo "📦 Export de la base de données..."
+          pg_dump "$DATABASE_URL" \
+            --no-owner \
+            --no-acl \
+            --clean \
+            --if-exists \
+            --format=plain \
+            --verbose \
+            2>&1 | gzip -9 > "$BACKUP_FILE_GZ"
+          
+          # Vérifier la taille du backup
+          BACKUP_SIZE=$(du -h "$BACKUP_FILE_GZ" | cut -f1)
+          echo "✅ Backup créé: $BACKUP_FILE_GZ ($BACKUP_SIZE)"
+          
+          # Upload vers GCS
+          echo "☁️  Upload vers GCS..."
+          gsutil cp "$BACKUP_FILE_GZ" \
+            "gs://flourishnow-backups-${BACKUP_TYPE}/database/${BACKUP_FILE_GZ}"
+          
+          echo "✅ Backup uploadé avec succès"
+          
+          # Afficher les informations
+          echo "📊 Informations du backup:"
+          echo "  - Type: $BACKUP_TYPE"
+          echo "  - Fichier: $BACKUP_FILE_GZ"
+          echo "  - Taille: $BACKUP_SIZE"
+          echo "  - Bucket: flourishnow-backups-${BACKUP_TYPE}"
+      
+      - name: Cleanup old backups
+        env:
+          BACKUP_TYPE: ${{ steps.backup_type.outputs.type }}
+        run: |
+          echo "🧹 Nettoyage des anciens backups ($BACKUP_TYPE)..."
+          
+          BUCKET="flourishnow-backups-${BACKUP_TYPE}"
+          
+          if [ "$BACKUP_TYPE" == "daily" ]; then
+            # Garder 7 jours pour daily
+            echo "Suppression des backups > 7 jours..."
+            gsutil -m ls -l "gs://${BUCKET}/database/" | \
+              awk '{print $2, $3}' | \
+              while read size date file; do
+                file_date=$(date -d "$date" +%s 2>/dev/null || echo 0)
+                days_old=$(( ($(date +%s) - file_date) / 86400 ))
+                if [ $days_old -gt 7 ]; then
+                  echo "  Suppression: $file (${days_old} jours)"
+                  gsutil rm "$file" || true
+                fi
+              done
+          elif [ "$BACKUP_TYPE" == "weekly" ]; then
+            # Garder 4 semaines pour weekly
+            echo "Suppression des backups > 4 semaines..."
+            gsutil -m ls -l "gs://${BUCKET}/database/" | \
+              awk '{print $2, $3}' | \
+              while read size date file; do
+                file_date=$(date -d "$date" +%s 2>/dev/null || echo 0)
+                weeks_old=$(( ($(date +%s) - file_date) / 604800 ))
+                if [ $weeks_old -gt 4 ]; then
+                  echo "  Suppression: $file (${weeks_old} semaines)"
+                  gsutil rm "$file" || true
+                fi
+              done
+          elif [ "$BACKUP_TYPE" == "monthly" ]; then
+            # Garder 12 mois pour monthly
+            echo "Suppression des backups > 12 mois..."
+            gsutil -m ls -l "gs://${BUCKET}/database/" | \
+              awk '{print $2, $3}' | \
+              while read size date file; do
+                file_date=$(date -d "$date" +%s 2>/dev/null || echo 0)
+                months_old=$(( ($(date +%s) - file_date) / 2592000 ))
+                if [ $months_old -gt 12 ]; then
+                  echo "  Suppression: $file (${months_old} mois)"
+                  gsutil rm "$file" || true
+                fi
+              done
+          fi
+          
+          # Afficher l'espace utilisé
+          echo ""
+          echo "📊 Espace utilisé dans le bucket:"
+          gsutil du -sh "gs://${BUCKET}/database/" || echo "  Aucun backup trouvé"
+      
+      - name: Summary
+        if: always()
+        run: |
+          echo "## 📋 Résumé du Backup" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Type**: ${{ steps.backup_type.outputs.type }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Date**: $(date)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Backup terminé avec succès" >> $GITHUB_STEP_SUMMARY
