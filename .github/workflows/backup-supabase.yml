@@ -33,10 +33,8 @@ jobs:
         run: |
           sudo apt-get update
           # Essayer d'abord avec le client générique (plus simple)
-          if sudo apt-get install -y postgresql-client; then
-            echo "✅ postgresql-client installé"
-          else
-            echo "⚠️  Installation du dépôt PostgreSQL officiel..."
+          sudo apt-get install -y postgresql-client || {
+            echo "⚠️  postgresql-client non disponible, installation du dépôt PostgreSQL officiel..."
             # Installer les dépendances nécessaires
             sudo apt-get install -y wget ca-certificates lsb-release gnupg
             # Ajouter le dépôt PostgreSQL officiel pour PostgreSQL 15
@@ -45,7 +43,8 @@ jobs:
             sudo apt-get update
             # Installer postgresql-client-15
             sudo apt-get install -y postgresql-client-15
-          fi
+          }
+          echo "✅ PostgreSQL client installé"
           pg_dump --version
       
       - name: Setup gcloud CLI
