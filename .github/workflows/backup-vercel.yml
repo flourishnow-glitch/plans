@@ -1,0 +1,104 @@
+name: Backup Vercel Configuration
+
+on:
+  schedule:
+    # Backup hebdomadaire dimanche à 5h UTC
+    - cron: '0 5 * * 0'
+  workflow_dispatch: # Permet déclenchement manuel
+
+jobs:
+  backup-vercel:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Setup Vercel CLI
+        run: |
+          npm install -g vercel@latest
+          vercel --version
+      
+      - name: Authenticate Vercel
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          echo "$VERCEL_TOKEN" | vercel login --token
+      
+      - name: Backup Vercel Environment Variables
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          echo "🔄 Backup des variables d'environnement Vercel..."
+          
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          BACKUP_DIR="vercel-backups"
+          mkdir -p "$BACKUP_DIR"
+          
+          # Lister toutes les variables d'environnement
+          vercel env ls > "$BACKUP_DIR/vercel-env-$TIMESTAMP.txt" 2>&1 || echo "⚠️  Impossible de lister les variables"
+          
+          # Exporter les variables (format JSON si possible)
+          vercel env pull .env.vercel.backup --environment=production 2>&1 || echo "⚠️  Impossible d'exporter les variables"
+          
+          if [ -f ".env.vercel.backup" ]; then
+            mv .env.vercel.backup "$BACKUP_DIR/vercel-env-$TIMESTAMP.env"
+          fi
+          
+          echo "✅ Backup Vercel créé"
+      
+      - name: Setup gcloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          service_account_key: ${{ secrets.GCP_SA_KEY }}
+          project_id: the-experience-477712-h0
+          export_default_credentials: true
+      
+      - name: Upload to GCS
+        run: |
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          BACKUP_DIR="vercel-backups"
+          
+          # Compresser les backups
+          if [ -d "$BACKUP_DIR" ] && [ "$(ls -A $BACKUP_DIR)" ]; then
+            tar -czf "vercel-backup-$TIMESTAMP.tar.gz" "$BACKUP_DIR"
+            
+            # Upload vers GCS
+            gsutil cp "vercel-backup-$TIMESTAMP.tar.gz" \
+              "gs://flourishnow-backups-weekly/vercel/vercel-backup-$TIMESTAMP.tar.gz"
+            
+            echo "✅ Backup Vercel uploadé vers GCS"
+            
+            # Nettoyer
+            rm -rf "$BACKUP_DIR" "vercel-backup-$TIMESTAMP.tar.gz"
+          else
+            echo "⚠️  Aucun backup Vercel à uploader"
+          fi
+      
+      - name: Cleanup old backups
+        run: |
+          echo "🧹 Nettoyage des anciens backups Vercel..."
+          
+          # Supprimer les backups > 4 semaines
+          gsutil -m ls -l "gs://flourishnow-backups-weekly/vercel/" 2>/dev/null | \
+            awk '{print $2, $3}' | \
+            while read size date file; do
+              file_date=$(date -d "$date" +%s 2>/dev/null || echo 0)
+              weeks_old=$(( ($(date +%s) - file_date) / 604800 ))
+              if [ $weeks_old -gt 4 ] && [ -n "$file" ]; then
+                echo "  Suppression: $file (${weeks_old} semaines)"
+                gsutil rm "$file" 2>/dev/null || true
+              fi
+            done
+      
+      - name: Summary
+        if: always()
+        run: |
+          echo "## 📋 Résumé du Backup Vercel" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Date**: $(date)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Backup Vercel terminé" >> $GITHUB_STEP_SUMMARY
